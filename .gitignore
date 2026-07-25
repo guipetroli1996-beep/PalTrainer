@@ -1,0 +1,27 @@
+# Build / cook outputs
+*.pak
+*.pdb
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+
+# Editor / OS junk
+.vs/
+.vscode/
+*.suo
+*.user
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs and local overrides
+*.log
+UE4SS.log
+local.env
+.env
+
+# Python cache (Editor scripts)
+__pycache__/
+*.pyc
