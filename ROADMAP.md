@@ -18,7 +18,8 @@ Design goal: **player is a trainer, active Pal is the fighter.**
 - [x] Confirm console: `[TrainerCombat] loaded`
 - [x] Confirm console on Pal throw: `ActivateOtomo slot=...`
 
-**Exit criteria:** Mod loads every launch; otomo activate logs every throw.
+**Exit criteria:** Mod loads every launch; otomo activate logs every throw.  
+**Status:** Done.
 
 ---
 
@@ -41,14 +42,14 @@ Design goal: **player is a trainer, active Pal is the fighter.**
 ### 1C — Hide/remove weapon schematics
 - [x] Strip combat weapon rows from technology / recipes / loot
 - [x] Strip combat grenades; keep `PalHealingGrenade`
-- [ ] Leave room for Phase 3 command rod item
 
 ### 1D — Capture sphere throw cooldown
 - [x] Cooldown after throwing capture spheres (+ sphere launchers)
 - [x] Does **not** affect party Pal throw (`DummyBall`) or summon lock (1A)
 - [x] Announce remaining CD on blocked attempt
 
-**Exit criteria:** Player guns/weapons don’t deal combat damage; Pal throw + tools still work; weapon schematics gone; capture spheres gated by cooldown.
+**Exit criteria:** Player guns/weapons don’t deal combat damage; Pal throw + tools still work; weapon schematics gone; capture spheres gated by cooldown.  
+**Status:** Working (1A–1D). Optional 1B polish left.
 
 ---
 
@@ -62,29 +63,39 @@ Design goal: **player is a trainer, active Pal is the fighter.**
 
 ### 2B — Threat while Pal is out
 - [x] Prefer Pal aggro via hate pulse + hard retarget assist
-- [x] Player DR / damage transfer implemented then **disabled** (aggro-only preferred)
+- [x] Player DR / damage transfer implemented then **disabled** (aggro-only preferred; DR caused muteki bugs)
 - [ ] Further aggro hardening if enemies still tunnel the player
 
-**Exit criteria:** Player Attack makes the Pal stronger; standing behind your Pal is safer than solo gunplay.
+**Exit criteria:** Player Attack makes the Pal stronger; standing behind your Pal is safer than solo gunplay.  
+**Status:** Working (2A + 2B aggro on; DR/transfer off).
 
 ---
 
-## Phase 3 — Manual mark (no command-rod item) — **IN PROGRESS**
+## Phase 3 — Manual trainer combat (no command-rod item)
 
-**Goal:** Aim+LMB marks a target (localized name); while Pal is out, **no free combat** (follow / NotCombat) until future skill orders.
+**Goal:** Aim+LMB orders a filler attack; Aim+1/2/3 order equipped skills; while Pal is out, **no free AI combat** (follow / NotCombat) until ordered.
 
-### Current focus
+### Implemented (Lua path)
 - [x] No Torch / command-rod item required
-- [x] Aim + LMB → sticky mark (+ MMB reticle tracked)
-- [x] Localized mark names (`GetLocalizedCharacterName`)
-- [x] LogicMod path: PMK at `D:\PalworldModdingKit` + `LogicMod/TrainerCombatBP` recipe
-- [x] Lua ↔ ModActor bridge (`bp_bridge.lua`) + strip AI thrash; NotCombat fallback
-- [x] Cook/deploy `LogicMods/TrainerCombatBP.pak`
-- [x] Playtest: Pal out, no mark, player fights → Pal does not attack
-- [x] Aim+LMB on marked target → one default/filler attack, then standby
-- [ ] Skill / move orders (slots 1–3) parked
+- [x] Aim+LMB → one elemental filler attack at aim target, then standby
+- [x] Aim+1/2/3 → equipped active skill orders (vanilla 1/2/3 suppressed while aiming)
+- [x] Localized target names where available
+- [x] Manual mode / NotCombat standby + AI cancel + block otomo free damage while standby
+- [x] Suppress field/base work in combat so Pal stays available for orders
+- [x] Lua ↔ ModActor bridge (`bp_bridge.lua`) ready for LogicMod
+- [x] Playtest: Pal out without order → does not free-fight (Lua fallback)
+- [x] Playtest: Aim+LMB → filler → standby; Aim+1/2/3 → skills → standby
 
-**Exit criteria:** Mark with Aim+LMB; Pal does not free-fight while out; second Aim+LMB on mark fires default attack then returns to standby.
+### Remaining / optional
+- [ ] Cook a non-stub `TrainerCombatBP.pak` (chunk 7 currently empty ~3KB — see `COOK_STATUS.md`)
+- [ ] LogicMod timer standby verified in-game (`bp: ModActor cached`)
+- [ ] Aim skill UMG HUD polish (`Hud.UseAimSkillHud` parked / off)
+- [ ] Optional: stronger standby if Lua NotCombat still leaks free AI after patches
+
+**Exit criteria (met via Lua):** Aim+LMB filler; Aim+1/2/3 skills; Pal does not free-fight while out; returns to standby after ordered attacks.  
+**Stretch:** LogicMod provides stronger standby than Lua alone.
+
+**Status:** Core trainer loop working in Lua. LogicMod cook broken/stub; Aim skill UMG parked.
 
 ---
 
@@ -97,7 +108,8 @@ Design goal: **player is a trainer, active Pal is the fighter.**
 - [ ] Test 2-player fight with both using trainer rules
 - [ ] Document host vs client install requirements
 
-**Exit criteria:** Two players can use the mod in co-op without major desync or duplicated effects.
+**Exit criteria:** Two players can use the mod in co-op without major desync or duplicated effects.  
+**Status:** Not started.
 
 ---
 
@@ -113,7 +125,10 @@ Design goal: **player is a trainer, active Pal is the fighter.**
 | `PreferPalAggro` | Feature flag | 2B |
 | `AttackTransferToPal` | Feature flag | 2A |
 | `AttackScaleBase` | Divisor for Attack percent (default `100`) | 2A |
-| `MarkStandby` / `LogicMod.Enabled` | Mark + LogicMod standby bridge | 3 |
+| `MarkStandby` / `SkillOrder.Enabled` | Filler + Aim+1/2/3 + standby | 3 |
+| `AimSkillKeyProbe` | Suppress vanilla 1/2/3 while aiming | 3 |
+| `LogicMod.Enabled` | Prefer LogicMod standby when pak loads | 3 |
+| `Hud.UseAimSkillHud` | Aim skill bar (parked / off) | 3 |
 
 ---
 
@@ -124,7 +139,7 @@ Design goal: **player is a trainer, active Pal is the fighter.**
 3. Feature flags in `config.lua` so a bad hook can be disabled without deleting code.
 4. After each Palworld patch: re-verify function paths in Live View.
 5. Prefer local-player checks always.
-6. Reload-crash hardening is ongoing but not blocking Phase 3.
+6. Reload-crash hardening is ongoing but not blocking gameplay.
 
 ---
 
@@ -133,9 +148,9 @@ Design goal: **player is a trainer, active Pal is the fighter.**
 | Phase | Status |
 |-------|--------|
 | 0 Tooling | Done |
-| 1 Soft trainer | 1A–1D working |
-| 2 Stats / threat | 2A + 2B aggro on (DR off) |
-| 3 Command rod | **Next / in progress** |
+| 1 Soft trainer | Working (optional 1B polish left) |
+| 2 Stats / threat | Working (aggro on; DR off) |
+| 3 Manual combat | **Working in Lua**; LogicMod cook stub; Aim HUD parked |
 | 4 Multiplayer | Later |
 
-**Next action:** Playtest mark-never-attack (Aim+MMB only). Re-enable skill orders after that is solid.
+**Next action:** Re-cook a real `TrainerCombatBP.pak` (chunk 7) so LogicMod standby can replace the Lua NotCombat fallback. Aim skill UMG remains parked until then.
