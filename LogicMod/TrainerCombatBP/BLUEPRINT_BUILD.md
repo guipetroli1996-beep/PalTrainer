@@ -103,7 +103,7 @@ UE4SS console should show LogicMod load for `TrainerCombatBP`, then Lua:
 ```
 
 Throw Pal, no mark, fight → Pal must not free-fight.
-Aim+MMB mark → ManualStandby off / Pal engages. H/J clear → standby again.
+Aim+MMB mark → ManualStandby off / Pal engages. Aim+MMB same target again → standby.
 
 ---
 

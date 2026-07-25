@@ -75,13 +75,13 @@ Design goal: **player is a trainer, active Pal is the fighter.**
 
 ## Phase 3 — Controlled Pal (Aim+MMB)
 
-**Goal:** Pal stays on standby until the player marks a target with base-game **Aim+MMB**; then vanilla Pal combat AI engages. Clear mark → standby again.
+**Goal:** Pal stays on standby until the player marks a target with base-game **Aim+MMB**; then vanilla Pal combat AI engages. Marking the same target again (or losing it) returns to standby.
 
 ### Implemented
 - [x] No Torch / command-rod item required
 - [x] Unmarked → LogicMod ManualStandby + NotCombat (Lua fallback if no pak)
 - [x] Aim+MMB on hostile → sticky mark + announce + release engage (Default order)
-- [x] H / J clear mark → re-arm standby
+- [x] Aim+MMB same target again → clear mark + standby
 - [x] Lost / dead mark → auto clear + standby
 - [x] Block otomo free damage while unmarked standby
 - [x] Suppress field/base work in combat
@@ -93,12 +93,12 @@ Design goal: **player is a trainer, active Pal is the fighter.**
 - [x] Aim skill key unbind / Aim skill HUD driving
 
 ### Remaining / optional
-- [ ] Cook a non-stub `TrainerCombatBP.pak` (chunk 7 currently empty ~3KB — see `COOK_STATUS.md`)
-- [ ] LogicMod timer standby verified in-game (`bp: ModActor cached`)
-- [ ] Optional: stronger standby if Lua NotCombat still leaks free AI after patches
+- [x] Ship cooked `TrainerCombatBP.pak` for players (`LogicMod/TrainerCombatBP/dist/`)
+- [x] LogicMod standby verified in-game (`bp: ModActor cached`)
+- [ ] Optional: stronger standby hardening if patches regress NotCombat / ModActor
 
-**Exit criteria:** Unmarked Pal does not free-fight; Aim+MMB mark engages vanilla AI; clear mark returns to standby.  
-**Status:** Core controlled-Pal loop on main. LogicMod cook still stub.
+**Exit criteria:** Unmarked Pal does not free-fight; Aim+MMB mark engages vanilla AI; remaking the same mark (or losing the target) returns to standby.  
+**Status:** Core controlled-Pal loop on main. Shipped LogicMod pak in repo.
 
 ---
 
@@ -154,7 +154,7 @@ All knobs live in `TrainerCombat/Scripts/config.lua`.
 | 0 Tooling | Done |
 | 1 Soft trainer | Working (optional 1B polish left) |
 | 2 Stats / threat | Working (aggro on; DR off) |
-| 3 Controlled Pal | **Working** (Aim+MMB mark→engage; LogicMod cook stub) |
+| 3 Controlled Pal | **Working** (Aim+MMB mark→engage; LogicMod pak shipped) |
 | 4 Multiplayer | Later |
 
-**Next action:** Re-cook a real `TrainerCombatBP.pak` (chunk 7) so LogicMod standby is stronger than the Lua NotCombat fallback.
+**Next action:** Multiplayer later, or harden standby if a Palworld patch breaks ModActor / NotCombat.

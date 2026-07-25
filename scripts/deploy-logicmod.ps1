@@ -7,7 +7,8 @@ param(
     [string]$KitRoot = "D:\PalworldModdingKit",
     [string]$ChunkId = "7",
     [string]$GamePaks = "E:\SteamLibrary\steamapps\common\Palworld\Pal\Content\Paks",
-    [string]$CookedPak = ""
+    [string]$CookedPak = "",
+    [switch]$UpdateShippedDist
 )
 
 $ErrorActionPreference = "Stop"
@@ -45,4 +46,14 @@ Copy-Item -LiteralPath $CookedPak -Destination $destPak -Force
 Write-Host "Deployed ($len bytes):" -ForegroundColor Green
 Write-Host "  $CookedPak"
 Write-Host "  -> $destPak"
+
+if ($UpdateShippedDist) {
+    $distDir = Join-Path $PSScriptRoot "..\LogicMod\TrainerCombatBP\dist"
+    $distPak = Join-Path $distDir "TrainerCombatBP.pak"
+    New-Item -ItemType Directory -Force -Path $distDir | Out-Null
+    Copy-Item -LiteralPath $CookedPak -Destination $distPak -Force
+    Write-Host "Updated shipped dist:" -ForegroundColor Green
+    Write-Host "  -> $distPak"
+}
+
 Write-Host "Launch Palworld and confirm UE4SS loads TrainerCombatBP + Lua bp: ModActor cached"

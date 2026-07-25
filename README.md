@@ -1,6 +1,6 @@
 # PalTrainer (Palworld)
 
-Single-player **UE4SS** Lua mod (+ optional LogicMod) that turns the player into a **trainer**: combat is meant for your active Pal, not you.
+Single-player **UE4SS** Lua mod (+ LogicMod pak) that turns the player into a **trainer**: combat is meant for your active Pal, not you.
 
 GitHub repo name: **PalTrainer** · in-game mod folder: `TrainerCombat`
 
@@ -19,10 +19,9 @@ Discontinued Aim+LMB filler / Aim+1/2/3 skill-order build: branch `archive/aim-l
 | 1 | Capture sphere throw cooldown | Working |
 | 2 | Attack stat boosts party Pals | Working |
 | 2 | Enemies prefer Pal (aggro assist) | Working |
-| 3 | Unmarked Pal standby (LogicMod / NotCombat) | Working (Lua fallback if no pak) |
+| 3 | Unmarked Pal standby (LogicMod / NotCombat) | Working |
 | 3 | Aim+MMB mark → engage (vanilla Pal AI) | Working |
-| 3 | Clear mark (H / J) → standby | Working |
-| 3 | LogicMod standby `.pak` | Optional — cook currently broken/stub |
+| 3 | Shipped LogicMod `.pak` | Working (`LogicMod/TrainerCombatBP/dist/`) |
 | 4 | Multiplayer | Not started |
 
 > Tool combat-damage zeroing was cancelled (not in scope).  
@@ -44,9 +43,9 @@ Discontinued Aim+LMB filler / Aim+1/2/3 skill-order build: branch `archive/aim-l
    ```
 4. Launch the game once so UE4SS creates runtime folders.
 
-## Install this mod (Lua)
+## Install this mod
 
-From this project folder:
+From this project folder (Lua + shipped LogicMod pak):
 
 ```bat
 install-to-game.bat "<Steam>\steamapps\common\Palworld\Pal\Binaries\Win64\Mods"
@@ -54,58 +53,46 @@ install-to-game.bat "<Steam>\steamapps\common\Palworld\Pal\Binaries\Win64\Mods"
 
 If your UE4SS install uses the nested layout, point at `...\Win64\ue4ss\Mods` instead.
 
+The installer copies:
+
+| Piece | Destination |
+|-------|-------------|
+| `TrainerCombat/` (Lua) | `...\Mods\TrainerCombat\` |
+| `LogicMod/TrainerCombatBP/dist/TrainerCombatBP.pak` | `...\Pal\Content\Paks\LogicMods\TrainerCombatBP.pak` |
+
 Also add/enable it in `Mods\mods.txt` if your UE4SS build requires that:
 
 ```
 TrainerCombat : 1
 ```
 
-## Phase 3 standby — LogicMod (optional)
+Manual pak copy (if the bat cannot find `Content\Paks`):
 
-Lua alone cannot always stop `PalAIActionCombat_Standard`. A cooked **LogicMod** is the preferred standby path when available.
+```
+LogicMod\TrainerCombatBP\dist\TrainerCombatBP.pak
+  →  <Steam>\steamapps\common\Palworld\Pal\Content\Paks\LogicMods\TrainerCombatBP.pak
+```
 
-**Current reality:** the last cook produced an empty/stub `pakchunk7` (~3KB). Deploy refuses that stub. Until a real `.pak` exists, Lua uses a **NotCombat order fallback**.
-
-### Prerequisites (when re-cooking)
-
-| Step | Notes |
-|------|--------|
-| [Palworld Modding Kit](https://pwmodding.wiki/docs/developers/palworld-modding-kit/prerequisites) | Clone locally |
-| UE **5.1** + Wwise **2021.1.11** | Required by PMK |
-| Blueprint ModActor wired + cooked | Follow [`LogicMod/TrainerCombatBP/BLUEPRINT_BUILD.md`](./LogicMod/TrainerCombatBP/BLUEPRINT_BUILD.md) |
-| Deploy `.pak` to `Paks/LogicMods` | `scripts\deploy-logicmod.ps1` (refuses pak &lt; ~10KB) |
-
-See also [`LogicMod/TrainerCombatBP/COOK_STATUS.md`](./LogicMod/TrainerCombatBP/COOK_STATUS.md).
-
-### Quick path
-
-1. Install PMK prereqs (UE 5.1, VS 2022, .NET 6, Wwise 2021.1.11).
-2. Check kit: `powershell -File scripts\setup-pmk.ps1`
-3. Open `Pal.uproject` from your PMK clone; run Editor Python:  
-   `LogicMod\TrainerCombatBP\Editor\CreateTrainerCombatLogicMod.py`
-4. Wire graphs per `BLUEPRINT_BUILD.md` (core call: `RequestSetOtomoOrder(NotCombat)`).
-5. Package Windows → copy a **non-stub** `pakchunk7-Windows.pak` →  
-   `Palworld\Pal\Content\Paks\LogicMods\TrainerCombatBP.pak`  
-   or: `powershell -File scripts\deploy-logicmod.ps1`
-6. Quit + relaunch Palworld. Console should show `bp: ModActor cached`.
+Without the pak, Lua still uses a **NotCombat order fallback** (weaker standby).
 
 ## Verify it works
 
 1. Start Palworld (single-player).
 2. Open the UE4SS GUI console.
 3. You should see: `[TrainerCombat] loaded`
-4. Throw a Pal → standby / follow-only (no free fight).
-5. Aim+MMB on a hostile → mark announce + Pal engages with vanilla combat AI.
-6. Press **H** or **J** → clear mark, Pal returns to standby.
-7. In combat, swap/recall should hit summon lock CD; sphere throws use sphere CD.
+4. Prefer also: `bp: ModActor cached` (LogicMod pak loaded).
+5. Throw a Pal → standby / follow-only (no free fight).
+6. Aim+MMB on a hostile → mark announce + Pal engages with vanilla combat AI.
+7. Aim+MMB the same target again → clear mark, Pal returns to standby.
+8. In combat, swap/recall should hit summon lock CD; sphere throws use sphere CD.
 
 ## Dev workflow
 
 1. Edit sources in this repo.
-2. After Lua edits, run `install-to-game.bat` (or copy `TrainerCombat` into the game `Mods` folder).
+2. After Lua / pak edits, run `install-to-game.bat` (or copy files manually).
 3. **Do not use Ctrl+R hot reload** while PalSchema (or other C++ UE4SS mods) are installed — it can crash during uninstall.
-4. After updating Lua: **fully quit Palworld and relaunch**.
-5. After a successful LogicMod cook: run `scripts\deploy-logicmod.ps1`, then full relaunch.
+4. After updating: **fully quit Palworld and relaunch**.
+5. After re-cooking the LogicMod: replace `LogicMod/TrainerCombatBP/dist/TrainerCombatBP.pak`, then reinstall.
 
 ## Config
 
@@ -118,6 +105,12 @@ Relevant knobs:
 - `MarkStandby.LogicMod.Enabled`
 - `MarkStandby.ManualAttackOnly` / `BlockOtomoDamage`
 - `MarkStandby.AnnounceMark`
+
+## Rebuild LogicMod (optional — maintainers)
+
+Players do **not** need UE / Wwise. Only rebuild if you change Blueprint standby:
+
+See [`LogicMod/TrainerCombatBP/BLUEPRINT_BUILD.md`](./LogicMod/TrainerCombatBP/BLUEPRINT_BUILD.md) and [`COOK_STATUS.md`](./LogicMod/TrainerCombatBP/COOK_STATUS.md). After packaging, copy the new chunk into `LogicMod/TrainerCombatBP/dist/TrainerCombatBP.pak` (or run `scripts\deploy-logicmod.ps1` and copy from the game `LogicMods` folder back into `dist/`).
 
 ## Notes
 

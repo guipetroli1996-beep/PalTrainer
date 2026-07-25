@@ -1,5 +1,7 @@
 # Build / cook outputs
 *.pak
+# Ship the cooked LogicMod players install (allowlist)
+!LogicMod/TrainerCombatBP/dist/TrainerCombatBP.pak
 *.pdb
 Binaries/
 Intermediate/

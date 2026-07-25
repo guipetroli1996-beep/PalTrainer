@@ -3,7 +3,7 @@
 
   Unmarked: LogicMod / NotCombat standby (no free AI combat).
   Aim+MMB on a hostile → sticky mark + release engage (vanilla Pal combat AI).
-  H / J (or lost target) → clear mark and re-arm standby.
+  Aim+MMB the same target again (or lost target) → clear mark and re-arm standby.
   Aim+LMB filler / Aim+1/2/3 skill orders live on archive/aim-lmb-skills only.
 ]]
 
@@ -2839,6 +2839,13 @@ local function clearMarkAndStandby(reason)
 end
 
 local function adoptMark(actor, reason, displayName)
+    -- Toggle: Aim+MMB the current mark again → clear and standby.
+    local current = getStickyMark()
+    if current ~= nil and actorsEqual(current, actor) then
+        announce("mark", "Mark cleared")
+        clearMarkAndStandby("toggle-" .. tostring(reason))
+        return false
+    end
     if not setStickyMark(actor, reason, displayName) then
         return false
     end
@@ -4587,17 +4594,6 @@ function MarkStandby.Register()
     end
 
     if RegisterKeyBind ~= nil and Key ~= nil then
-        bindKey(Key.H, "H = clear mark", function()
-            if MarkStandby.IsManualMode() then
-                clearMarkAndStandby("key-H")
-            end
-        end)
-        bindKey(Key.J, "J = clear mark", function()
-            if MarkStandby.IsManualMode() then
-                clearMarkAndStandby("key-J")
-            end
-        end)
-
         local rmb = Key.RightMouseButton or Key.RIGHT_MOUSE_BUTTON or Key.RightMouse
         if rmb ~= nil then
             bindKey(rmb, "RMB = aim pulse", function()
