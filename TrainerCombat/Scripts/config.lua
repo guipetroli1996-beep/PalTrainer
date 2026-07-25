@@ -35,7 +35,7 @@ local Config = {
     -- Base-camp / box pals are not boosted. Attack 100 = 100%; 150 = 150%.
     -- Combat uses AttackUp on spawned party pals; Stats UI uses withBuff hooks.
     AttackScaleBase = 100,
-    -- Off: only lock CD / sphere CD / attack+skill commands / skill CD announce.
+    -- Off: only lock CD / sphere CD / mark announce.
     AnnounceAttackBoost = false,
 
     -- TEST ONLY: pretend player Attack is this value (nil = use real Attack).
@@ -43,68 +43,38 @@ local Config = {
     --   100 = baseline (1.0x), 300 = obvious 3x Pal Attack on Stats, then set nil.
     AttackTestFakeAttack = nil,
 
-    -- Phase 3: Aim+LMB filler attack + follow-only standby (LogicMod / NotCombat).
-    -- Lua keeps Aim+LMB attack + NotCombat fallback until the .pak is cooked.
+    -- Phase 3: controlled Pal — unmarked standby; Aim+MMB mark → engage.
+    -- Aim+LMB filler / Aim+1/2/3 skills: archive/aim-lmb-skills only.
     MarkStandby = {
         -- Master off for all mark_standby Hud announces (legacy).
         AnnounceOrders = true,
-        -- Granular filters (ignored when AnnounceOrders == false).
-        AnnounceAttackCommands = true,  -- "{Pal} attack {Target}"
-        AnnounceSkillCommands = true,   -- "{Pal} use {Skill} on {Target}"
-        AnnounceSkillCooldown = true,   -- skill / Aim+LMB filler on CD
+        -- Aim+MMB mark announce ("Marked: <name>").
+        AnnounceMark = true,
+        -- Legacy knobs (filler/skills archived — kept so old configs do not error).
+        AnnounceAttackCommands = false,
+        AnnounceSkillCommands = false,
+        AnnounceSkillCooldown = false,
         -- Light Lua reassert only; LogicMod timer does the real work (~0.35s).
         StandbyIntervalMs = 350,
+        -- true = Pal standby until Aim+MMB mark, then vanilla combat AI.
         ManualAttackOnly = true,
-        -- Zero ProcessDamage from active Pal while manual follow/standby.
+        -- Zero ProcessDamage from active Pal while unmarked standby.
         BlockOtomoDamage = true,
         LogicMod = {
             Enabled = true,
             ForceMinGapSeconds = 0.15,
         },
-        -- Aim+LMB on a hostile → one elemental filler (same element as Pal), then standby.
-        -- No separate mark step. Priority: boring waza → element common shot → neutrals.
+        -- Archived on archive/aim-lmb-skills (disabled here).
         DefaultAttack = {
-            Enabled = true,
-            -- Hard CD between filler orders (also used as Aim+LMB debounce).
-            CooldownSeconds = 2.0,
-            DebounceSeconds = 2.0,
-            ApproachTimeoutSeconds = 6.0,
-            RetryIntervalMs = 250,
-            AfterFireStandbyMs = 1000,
-            -- Neutral last resorts only (PowerShot=sky drop — keep last).
-            RangedWazaIds = { 22, 5, 12, 11 }, -- AirCanon, EnergyShot, PowerBall, PowerShot
-            UseDirectOrder = false,
+            Enabled = false,
         },
-        -- Aim+1/2/3 → order equipped active skills (slots map to ActiveSkillSlot IDs).
         SkillOrder = {
-            Enabled = true,
-            DebounceSeconds = 0.35,
-            -- Wait for cast confirm before standby (after in-range PlayAction).
-            ApproachTimeoutSeconds = 8.0,
-            RetryIntervalMs = 250,
-            AfterFireStandbyMs = 1200,
-            ReassertOrderMs = 750,
-            SkillSlotSyncMs = 50,
-            -- When EquipWaza already resolved the slot, skip SkillMap wait (cuts free-AI window).
-            EquipReadySyncMs = 0,
-            -- One-frame settle after opening Default before PlayAction.
-            PrePlayActionSettleMs = 16,
-            -- After PlayAction accepts, wait before NotCombat (montage commit).
-            PostAcceptNotCombatMs = 400,
-            -- Distance fallbacks when InWazaMaxRange / WazaDB are unavailable (UU ≈ cm).
-            InRangeDistanceUU = 2200,
-            TooFarDistanceUU = 4500,
-            -- UI keys 1/2/3 → EquipWaza / SkillMap indices (0-based).
-            SlotIds = { 0, 1, 2 },
-            -- Local cast clock fallback when game CoolTime read fails.
-            FallbackCooldownSeconds = 8.0,
-            -- Always respect CD for skill orders (config kept for docs; enforced in code).
-            RespectSkillCooldown = true,
+            Enabled = false,
         },
         -- While player is in combat: suppress active-Pal field work (deforest/mine/gather)
-        -- and base-camp work so the Pal stays available for filler orders.
+        -- and base-camp work so the Pal stays available for combat.
         SuppressOtomoWorkInCombat = true,
-        -- How long after last combat/filler to keep suppressing work (falls back to CombatMemorySeconds).
+        -- How long after last combat/engage to keep suppressing work (falls back to CombatMemorySeconds).
         CombatWorkSuppressSeconds = nil,
     },
 
@@ -115,18 +85,15 @@ local Config = {
         UseSystemAnnounce = true,
         BlockedAnnounceDebounce = 0.75,
 
-        -- Experimental (off): ActiveSkill cooldown UI
+        -- Experimental (off): ActiveSkill cooldown UI (archive path).
         UseSkillCooldownUI = false,
 
-        -- Ride-style Aim+1/2/3 skill bar while aiming (DrawHUD + optional LogicMod UMG).
-        -- Parked: UMG layout not polished yet; Aim+1/2/3 orders still work without this HUD.
+        -- Aim+1/2/3 skill bar (archive/aim-lmb-skills only).
         UseAimSkillHud = false,
         AimSkillHud = {
-            -- 0..1 screen fractions (0,0 = top-left); Canvas path only.
             YPercent = 0.88,
             Scale = 1.25,
             LineHeight = 22,
-            -- When re-enabled: prefer WBP left-align in Designer; avoid Lua Position writes.
             UseSystemAnnounce = false,
             AnnounceIntervalSeconds = 1.25,
         },
@@ -149,7 +116,7 @@ local Config = {
         SummonLock = true,
         -- When true: free throw/recall/swap out of combat.
         -- In combat: lock on ActivateOtomo, and also when combat starts with a
-        -- Pal already fielded (damage / battle mode / Aim+LMB|skill orders).
+        -- Pal already fielded (damage / battle mode / Aim+MMB engage).
         -- Not on recall alone.
         -- Combat window = hostile AI / damage / battle mode (not nearby passives).
         -- When false: always lock for SummonLockSeconds after every summon (old behavior).
@@ -176,12 +143,11 @@ local Config = {
         -- Phase 2A: boost party (otomo) Pal Attack by player Attack % (not base camp).
         AttackTransferToPal = true,
 
-        -- Phase 3: Aim+LMB filler attack + follow-only (LogicMod / NotCombat standby).
+        -- Phase 3: unmarked standby + Aim+MMB mark → engage.
         MarkStandby = true,
 
-        -- While aiming, suppress vanilla 1/2/3 (Pal/sphere switch) and order
-        -- active Pal skills from slots 1–3 instead.
-        AimSkillKeyProbe = true,
+        -- Aim+1/2/3 skill key probe (archive/aim-lmb-skills only).
+        AimSkillKeyProbe = false,
     },
 }
 

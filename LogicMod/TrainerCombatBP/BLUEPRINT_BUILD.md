@@ -4,7 +4,8 @@ Cooked target: `Pal/Content/Paks/LogicMods/TrainerCombatBP.pak`
 PMK path: `D:\PalworldModdingKit`  
 Chunk ID: **7**
 
-This LogicMod owns **otomo standby** on the game thread. Lua keeps Aim+LMB mark/announce and calls into this ModActor.
+This LogicMod owns **otomo standby** on the game thread while the Pal is unmarked.
+Lua handles Aim+MMB mark → engage (`ManualStandby=false`) and clear-mark → standby.
 
 ## Prerequisites
 
@@ -102,6 +103,7 @@ UE4SS console should show LogicMod load for `TrainerCombatBP`, then Lua:
 ```
 
 Throw Pal, no mark, fight → Pal must not free-fight.
+Aim+MMB mark → ManualStandby off / Pal engages. H/J clear → standby again.
 
 ---
 

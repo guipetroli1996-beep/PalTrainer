@@ -6,6 +6,8 @@ Design goal: **player is a trainer, active Pal is the fighter.**
 
 **Out of scope:** tool combat damage zeroing (formerly Phase 4) — tools stay as-is.
 
+**Archive:** Aim+LMB filler + Aim+1/2/3 skill orders live on branch `archive/aim-lmb-skills` (discontinued).
+
 ---
 
 ## Phase 0 — Tooling & proof of life
@@ -71,31 +73,32 @@ Design goal: **player is a trainer, active Pal is the fighter.**
 
 ---
 
-## Phase 3 — Manual trainer combat (no command-rod item)
+## Phase 3 — Controlled Pal (Aim+MMB)
 
-**Goal:** Aim+LMB orders a filler attack; Aim+1/2/3 order equipped skills; while Pal is out, **no free AI combat** (follow / NotCombat) until ordered.
+**Goal:** Pal stays on standby until the player marks a target with base-game **Aim+MMB**; then vanilla Pal combat AI engages. Clear mark → standby again.
 
-### Implemented (Lua path)
+### Implemented
 - [x] No Torch / command-rod item required
-- [x] Aim+LMB → one elemental filler attack at aim target, then standby
-- [x] Aim+1/2/3 → equipped active skill orders (vanilla 1/2/3 suppressed while aiming)
-- [x] Localized target names where available
-- [x] Manual mode / NotCombat standby + AI cancel + block otomo free damage while standby
-- [x] Suppress field/base work in combat so Pal stays available for orders
+- [x] Unmarked → LogicMod ManualStandby + NotCombat (Lua fallback if no pak)
+- [x] Aim+MMB on hostile → sticky mark + announce + release engage (Default order)
+- [x] H / J clear mark → re-arm standby
+- [x] Lost / dead mark → auto clear + standby
+- [x] Block otomo free damage while unmarked standby
+- [x] Suppress field/base work in combat
 - [x] Lua ↔ ModActor bridge (`bp_bridge.lua`) ready for LogicMod
-- [x] Playtest: Pal out without order → does not free-fight (Lua fallback)
-- [x] Playtest: Aim+LMB → filler → standby; Aim+1/2/3 → skills → standby
+
+### Removed from main (see `archive/aim-lmb-skills`)
+- [x] Aim+LMB elemental filler orders
+- [x] Aim+1/2/3 equipped skill orders
+- [x] Aim skill key unbind / Aim skill HUD driving
 
 ### Remaining / optional
 - [ ] Cook a non-stub `TrainerCombatBP.pak` (chunk 7 currently empty ~3KB — see `COOK_STATUS.md`)
 - [ ] LogicMod timer standby verified in-game (`bp: ModActor cached`)
-- [ ] Aim skill UMG HUD polish (`Hud.UseAimSkillHud` parked / off)
 - [ ] Optional: stronger standby if Lua NotCombat still leaks free AI after patches
 
-**Exit criteria (met via Lua):** Aim+LMB filler; Aim+1/2/3 skills; Pal does not free-fight while out; returns to standby after ordered attacks.  
-**Stretch:** LogicMod provides stronger standby than Lua alone.
-
-**Status:** Core trainer loop working in Lua. LogicMod cook broken/stub; Aim skill UMG parked.
+**Exit criteria:** Unmarked Pal does not free-fight; Aim+MMB mark engages vanilla AI; clear mark returns to standby.  
+**Status:** Core controlled-Pal loop on main. LogicMod cook still stub.
 
 ---
 
@@ -125,10 +128,11 @@ Design goal: **player is a trainer, active Pal is the fighter.**
 | `PreferPalAggro` | Feature flag | 2B |
 | `AttackTransferToPal` | Feature flag | 2A |
 | `AttackScaleBase` | Divisor for Attack percent (default `100`) | 2A |
-| `MarkStandby` / `SkillOrder.Enabled` | Filler + Aim+1/2/3 + standby | 3 |
-| `AimSkillKeyProbe` | Suppress vanilla 1/2/3 while aiming | 3 |
+| `MarkStandby` / `ManualAttackOnly` | Unmarked standby + mark→engage | 3 |
 | `LogicMod.Enabled` | Prefer LogicMod standby when pak loads | 3 |
-| `Hud.UseAimSkillHud` | Aim skill bar (parked / off) | 3 |
+| `AnnounceMark` | Hud announce on Aim+MMB mark | 3 |
+
+All knobs live in `TrainerCombat/Scripts/config.lua`.
 
 ---
 
@@ -150,7 +154,7 @@ Design goal: **player is a trainer, active Pal is the fighter.**
 | 0 Tooling | Done |
 | 1 Soft trainer | Working (optional 1B polish left) |
 | 2 Stats / threat | Working (aggro on; DR off) |
-| 3 Manual combat | **Working in Lua**; LogicMod cook stub; Aim HUD parked |
+| 3 Controlled Pal | **Working** (Aim+MMB mark→engage; LogicMod cook stub) |
 | 4 Multiplayer | Later |
 
-**Next action:** Re-cook a real `TrainerCombatBP.pak` (chunk 7) so LogicMod standby can replace the Lua NotCombat fallback. Aim skill UMG remains parked until then.
+**Next action:** Re-cook a real `TrainerCombatBP.pak` (chunk 7) so LogicMod standby is stronger than the Lua NotCombat fallback.

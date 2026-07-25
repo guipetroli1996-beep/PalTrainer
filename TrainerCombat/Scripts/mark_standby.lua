@@ -1,11 +1,10 @@
 --[[
-  TrainerCombat — Mark standby (Phase 3)
+  TrainerCombat — Controlled Pal (Phase 3)
 
-  Aim+LMB on a hostile → one elemental filler attack (2s CD), then standby.
-  While the player is in combat, suppress active-Pal field work (deforest/mine/gather)
-  so the Pal does not chop trees instead of taking attack orders.
-  MMB reticle can still soft-track a follow target (optional).
-  Standby: LogicMod ModActor owns freeze/follow (RequestSetOtomoOrder NotCombat).
+  Unmarked: LogicMod / NotCombat standby (no free AI combat).
+  Aim+MMB on a hostile → sticky mark + release engage (vanilla Pal combat AI).
+  H / J (or lost target) → clear mark and re-arm standby.
+  Aim+LMB filler / Aim+1/2/3 skill orders live on archive/aim-lmb-skills only.
 ]]
 
 local Config = require("config")
@@ -13,7 +12,16 @@ local Session = require("session")
 local Hud = require("hud")
 local UEHelpers = require("UEHelpers")
 local BpBridge = require("bp_bridge")
-local AimSkillHud = require("aim_skill_hud")
+-- Aim skill HUD parked (archive/aim-lmb-skills). Stub so leftover call sites are safe.
+local AimSkillHud = {
+    Register = function() end,
+    Hide = function() end,
+    Show = function() end,
+    Update = function() end,
+    IsVisible = function()
+        return false
+    end,
+}
 
 local MarkStandby = {
     hooked = false,
@@ -202,12 +210,17 @@ local function objectName(obj)
     return n
 end
 
---- kind: "attack" | "skill" | "skill_cd" (other kinds are not announced).
+--- kind: "mark" | "attack" | "skill" | "skill_cd" (other kinds log only).
 local function announce(kind, text)
     if cfg().AnnounceOrders == false then
         return
     end
-    if kind == "attack" then
+    if kind == "mark" then
+        if cfg().AnnounceMark == false then
+            log(tostring(text))
+            return
+        end
+    elseif kind == "attack" then
         if cfg().AnnounceAttackCommands == false then
             return
         end
@@ -220,7 +233,7 @@ local function announce(kind, text)
             return
         end
     else
-        -- Standby / mark / too-far / empty-slot / etc. — intentionally silent.
+        -- Standby / too-far / empty-slot / etc. — intentionally silent.
         log(tostring(text))
         return
     end
@@ -581,7 +594,7 @@ end
 function MarkStandby.NoteCombat(reason)
     MarkStandby.lastCombatAt = now()
     debug("mark: combat noted (" .. tostring(reason) .. ")")
-    -- Notify main.lua so summon-lock combat window sees Aim+LMB / skill orders.
+    -- Notify main.lua so summon-lock combat window sees mark/engage.
     if MarkStandby.OnCombatNoted ~= nil then
         pcall(MarkStandby.OnCombatNoted, reason)
     end
@@ -626,6 +639,10 @@ function MarkStandby.ShouldSuppressFreeCombat()
     if cfg().ManualAttackOnly == false then
         return false
     end
+    -- Marked = engage: allow vanilla combat AI + threat aggro assist.
+    if MarkStandby.HasMarkedTarget() then
+        return false
+    end
     return MarkStandby.palOut == true
 end
 
@@ -636,8 +653,8 @@ function MarkStandby.ShouldBlockOtomoDamage()
     if cfg().BlockOtomoDamage == false then
         return false
     end
-    -- Allow damage during ordered default-attack window.
-    if now() < (MarkStandby.attackWindowUntil or 0) then
+    -- Marked / engage: Pal may deal damage. Unmarked standby: zero outgoing damage.
+    if MarkStandby.HasMarkedTarget() then
         return false
     end
     return true
@@ -994,10 +1011,25 @@ forceStandby = function(otomo, reason)
 
     -- Always apply Lua NotCombat — BP UFunction calls are unreliable on this build.
     requestNotCombatOrder(reason)
+    BpBridge.SetManualStandby(true)
     BpBridge.ForceOtomoStandby(reason)
 
     if otomo ~= nil then
         softCancelCombat(otomo)
+    end
+end
+
+--- Aim+MMB mark: lift LogicMod standby and let vanilla Pal combat AI engage.
+local function releaseToEngage(otomo, reason, target)
+    MarkStandby.NoteCombat("engage-" .. tostring(reason))
+    BpBridge.SetManualStandby(false)
+    requestDefaultOrder(reason)
+    if target ~= nil then
+        setDirectOrderTarget(target)
+    end
+    log("mark: ENGAGE (" .. tostring(reason) .. ") → " .. tostring(MarkStandby.stickyMarkDisplayName or "?"))
+    if otomo ~= nil then
+        debug("mark: engage otomo=" .. tostring(objectName(otomo)))
     end
 end
 
@@ -2810,12 +2842,10 @@ local function adoptMark(actor, reason, displayName)
     if not setStickyMark(actor, reason, displayName) then
         return false
     end
-    disableOtomoAutoReticleCombat()
+    local label = MarkStandby.stickyMarkDisplayName or displayName or "?"
+    announce("mark", "Marked: " .. tostring(label))
     local otomo = getActiveOtomoActor()
-    forceStandby(otomo, "mark-" .. tostring(reason))
-    Session.Defer(50, function()
-        forceStandby(getActiveOtomoActor(), "mark+50ms")
-    end)
+    releaseToEngage(otomo, "mark-" .. tostring(reason), actor)
     return true
 end
 
@@ -3743,15 +3773,7 @@ local function setPlayerAiming(on, reason)
     end
     MarkStandby.playerAiming = nextVal
     debug("mark: aiming=" .. tostring(nextVal) .. " (" .. tostring(reason) .. ")")
-    if nextVal then
-        setMarkShootDisabled(true, reason or "aim-start")
-        setAimSkillDefaultKeysBlocked(true, reason or "aim-start")
-        refreshAimSkillHud(reason or "aim-start")
-    else
-        setMarkShootDisabled(false, reason or "aim-end")
-        setAimSkillDefaultKeysBlocked(false, reason or "aim-end")
-        AimSkillHud.Hide(reason or "aim-end")
-    end
+    -- Do not disable shoot / unbind 1/2/3 — Aim+LMB/skills archived.
 end
 
 local function getAimMarkCandidate()
@@ -3944,6 +3966,10 @@ local function onReticleTargetSet(Context, Actor)
     if now() < (MarkStandby.ignoreReticleUntil or 0) then
         return
     end
+    -- Base-game Aim+MMB path: only adopt while aiming.
+    if not isPlayerAiming() then
+        return
+    end
 
     local comp = unwrap(Context)
     local player = select(1, getLocalPlayerCharacter())
@@ -3973,7 +3999,6 @@ local function onReticleTargetSet(Context, Actor)
 
     local name = displayNameForTarget(actor)
     adoptMark(actor, "MMB", name)
-    forceStandby(otomo, "MMB-follow-only")
 end
 
 local function startStandbyLoop()
@@ -3991,13 +4016,6 @@ local function startStandbyLoop()
 
         -- GetOff hooks are flaky; poll mount state every tick.
         syncRideStateFromProbe("standby-loop")
-
-        -- Keep Aim+1/2/3 skill bar CD fills fresh while aiming.
-        if isPlayerAiming() then
-            refreshAimSkillHud("standby-loop")
-        elseif AimSkillHud.IsVisible() then
-            AimSkillHud.Hide("standby-loop-not-aiming")
-        end
 
         if not MarkStandby.IsManualMode() then
             return false
@@ -4018,11 +4036,21 @@ local function startStandbyLoop()
             return false
         end
 
-        -- Do not yank the Pal back to follow while a default attack is in flight.
-        if inAttackWindow() then
+        -- Marked target died / despawned → back to standby.
+        if MarkStandby.stickyMark ~= nil and getStickyMark() == nil then
+            clearMarkAndStandby("target-lost")
             return false
         end
 
+        -- Marked = engage: do not yank Pal back to NotCombat.
+        if MarkStandby.HasMarkedTarget() then
+            if MarkStandby.ShouldSuppressOtomoWork() then
+                suppressOtomoWork(otomo, "engage-loop-combat")
+            end
+            return false
+        end
+
+        -- Unmarked standby.
         disableOtomoAutoReticleCombat()
         if MarkStandby.ShouldSuppressOtomoWork() then
             suppressOtomoWork(otomo, "standby-loop-combat")
@@ -4030,8 +4058,6 @@ local function startStandbyLoop()
         local reason
         if MarkStandby.IsPlayerInCombat() then
             reason = "follow-combat"
-        elseif MarkStandby.HasMarkedTarget() then
-            reason = "follow-marked"
         else
             reason = "follow-unmarked"
         end
@@ -4046,35 +4072,47 @@ function MarkStandby.OnPalActivated(slot)
     end
     MarkStandby.palOut = true
     MarkStandby.activeSlot = slot
-    clearStickyMark("ActivateOtomo")
+    -- Keep sticky Aim+MMB mark across switches so combat lock + engage survive.
     disableOtomoAutoReticleCombat()
 
-    local armed = BpBridge.SetManualStandby(true)
     local otomo = getActiveOtomoActor()
-    forceStandby(otomo, "ActivateOtomo")
+    local marked = getStickyMark()
+    local armed
+    if marked ~= nil then
+        armed = BpBridge.SetManualStandby(false)
+        releaseToEngage(otomo, "ActivateOtomo-keep-mark", marked)
+    else
+        armed = BpBridge.SetManualStandby(true)
+        forceStandby(otomo, "ActivateOtomo")
+    end
 
     local charId = nil
     pcall(function()
         charId = select(1, getCharacterId(otomo))
     end)
     log(string.format(
-        "mark: Pal out slot=%s actor=%s charId=%s",
+        "mark: Pal out slot=%s actor=%s charId=%s marked=%s",
         tostring(slot),
         tostring(shortActorName(otomo)),
-        tostring(charId)
+        tostring(charId),
+        tostring(marked ~= nil)
     ))
 
-    Session.Defer(200, disableOtomoAutoReticleCombat)
-    Session.Defer(800, function()
-        disableOtomoAutoReticleCombat()
-        BpBridge.SetManualStandby(true)
-        forceStandby(getActiveOtomoActor(), "ActivateOtomo+800ms")
-    end)
+    if marked == nil then
+        Session.Defer(200, disableOtomoAutoReticleCombat)
+        Session.Defer(800, function()
+            disableOtomoAutoReticleCombat()
+            BpBridge.SetManualStandby(true)
+            forceStandby(getActiveOtomoActor(), "ActivateOtomo+800ms")
+        end)
+    end
 
     MarkStandby.loggedEquipWazaDump = false
     MarkStandby.skillSlotCdUntil = {}
 
-    if armed then
+    if marked ~= nil then
+        log("mark: Pal out — keep mark engage (slot=" .. tostring(slot) .. ")")
+    elseif armed then
         log("mark: Pal out — LogicMod standby (slot=" .. tostring(slot) .. ")")
     else
         log("mark: Pal out — Lua NotCombat fallback (slot=" .. tostring(slot) .. ")")
@@ -4115,6 +4153,14 @@ function MarkStandby.OnPalRecalled(reason)
     -- Ride mount/dismount can fire inactivate paths — never treat that as a real recall.
     if MarkStandby.IsRiding() or reason == "ride" or reason == "Ride" then
         log("mark: OnPalRecalled ignored while riding (" .. tostring(reason) .. ")")
+        return
+    end
+    -- Pal swap fires Inactivate then Activate — keep sticky mark for the next Pal.
+    if reason == "InactivateCurrentOtomo" then
+        MarkStandby.palOut = false
+        MarkStandby.activeSlot = nil
+        log("mark: OnPalRecalled soft (InactivateCurrentOtomo) — keep mark="
+            .. tostring(MarkStandby.HasMarkedTarget()))
         return
     end
     MarkStandby.palOut = false
@@ -4282,7 +4328,6 @@ function MarkStandby.Register()
     MarkStandby.hooked = true
 
     BpBridge.Register()
-    AimSkillHud.Register()
 
     -- Ride: pause trainer mode; GetOff: restore standby (ActivateOtomo does not re-fire).
     -- Also poll in standby loop — GetOff/Dettach hooks often miss combat dismounts.
@@ -4333,7 +4378,7 @@ function MarkStandby.Register()
             "/Script/Pal.PalCharacterParameterComponent:SetReticleTarget",
             onReticleTargetSet
         )
-        log("mark: hooked SetReticleTarget (MMB mark → follow only)")
+        log("mark: hooked SetReticleTarget (Aim+MMB mark → engage)")
     end)
 
     pcall(function()
@@ -4372,7 +4417,8 @@ function MarkStandby.Register()
                 Session.Defer(1, function()
                     local o = getActiveOtomoActor()
                     suppressOtomoWork(o, "battle-mode-on")
-                    if o ~= nil and not inAttackWindow() then
+                    -- Only yank to standby when unmarked; marked = engage.
+                    if o ~= nil and not MarkStandby.HasMarkedTarget() and not inAttackWindow() then
                         forceStandby(o, "battle-mode-on")
                     end
                 end)
@@ -4447,74 +4493,7 @@ function MarkStandby.Register()
         "/Game/Pal/Blueprint/Component/OtomoHolder/BP_OtomoPalHolderComponent.BP_OtomoPalHolderComponent_C:TryFixAssignNearestWorkSelectedOtomo"
     )
 
-    pcall(function()
-        RegisterHook("/Script/Pal.PalWeaponBase:OnPullTrigger", function(Context)
-            local weapon = unwrap(Context)
-            tryAimLmbMark(weapon)
-        end)
-        log("mark: hooked OnPullTrigger (Aim+LMB filler attack)")
-    end)
-
-    -- Probe: while aiming, unbind OtomoChangeDecrement / SphereChange /
-    -- OtomoChangeIncrement (see setAimSkillDefaultKeysBlocked). Diagnostic hooks
-    -- only log if vanilla handlers still fire (means unbind failed).
-    if aimSkillProbeEnabled() then
-        local function logIfAimLeak(label)
-            if not isPlayerAiming() or not MarkStandby.IsManualMode() then
-                return
-            end
-            log("mark: WARNING aim-key leak — " .. tostring(label) .. " still fired while aiming")
-        end
-
-        pcall(function()
-            RegisterHook("/Script/Pal.PalPlayerController:OnOtomoChangeIncrement", function()
-                logIfAimLeak("OnOtomoChangeIncrement")
-            end)
-            RegisterHook("/Script/Pal.PalPlayerController:OnOtomoChangeDecrement", function()
-                logIfAimLeak("OnOtomoChangeDecrement")
-            end)
-            log("mark: hooked OtomoChange* (aim leak diagnostics)")
-        end)
-
-        pcall(function()
-            RegisterHook("/Script/Pal.PalPlayerController:PlaySkill", function(_Context, SlotId)
-                if not featureOn() or not Session.IsAlive() then
-                    return
-                end
-                if not isPlayerAiming() or not MarkStandby.IsManualMode() then
-                    return
-                end
-                local slot = unwrap(SlotId)
-                MarkStandby.blockPlaySkillUntil = now() + 0.45
-                log("mark: PlaySkill WHILE AIMING slot=" .. tostring(slot) .. " — will cancel")
-            end, function(_Context, SlotId)
-                if now() > (MarkStandby.blockPlaySkillUntil or 0) then
-                    return
-                end
-                local slot = unwrap(SlotId)
-                Session.Defer(1, function()
-                    local otomo = getActiveOtomoActor()
-                    if otomo == nil then
-                        return
-                    end
-                    pcall(function()
-                        local ac = otomo.ActionComponent
-                        if ac ~= nil and ac:IsValid() and ac.CancelAllAction ~= nil then
-                            ac:CancelAllAction()
-                        end
-                    end)
-                    softCancelCombat(otomo)
-                    if not inAttackWindow() then
-                        MarkStandby.lastNotCombatAt = 0
-                        requestNotCombatOrder("aim-block-PlaySkill")
-                        forceStandby(otomo, "aim-block-PlaySkill")
-                    end
-                    log("mark: cancelled PlaySkill side-effects (aim probe) slot=" .. tostring(slot))
-                end)
-            end)
-            log("mark: hooked PlaySkill (aim probe — cancel while aiming)")
-        end)
-    end
+    -- Aim+LMB filler / Aim+1/2/3 skill orders removed (see archive/aim-lmb-skills).
 
     pcall(function()
         RegisterHook("/Script/Pal.PalActionComponent:PlayActionByType", function(Context, _ActionTarget, ActionType)
@@ -4540,27 +4519,19 @@ function MarkStandby.Register()
                     end
                 end
             end
-
-            if now() > (MarkStandby.suppressPlayerAttackUntil or 0) then
-                return
-            end
-            local player = select(1, getLocalPlayerCharacter())
-            if player ~= nil and actorsEqual(owner, player) then
-                Session.Defer(1, function()
-                    cancelLocalPlayerAttack(nil, "PlayActionByType-suppress")
-                end)
-            end
         end)
-        log("mark: hooked PlayActionByType (player suppress + otomo field-work cancel)")
+        log("mark: hooked PlayActionByType (otomo field-work cancel)")
     end)
 
-    -- Undo free combat AI. During ranged filler: Follow only (keep Default order —
-    -- do NOT RequestSetOtomoOrder(NotCombat) or PlayActionByWazaID gets canceled).
+    -- Undo free combat AI only while unmarked (standby). Marked = engage → leave combat AI alone.
     pcall(function()
         RegisterHook(
             "/Script/Pal.PalAIActionOtomoDefault:SetOtomoCombatAction",
             function(Context)
                 if not MarkStandby.IsManualMode() then
+                    return
+                end
+                if MarkStandby.HasMarkedTarget() then
                     return
                 end
                 local self = unwrap(Context)
@@ -4574,49 +4545,32 @@ function MarkStandby.Register()
                 if not MarkStandby.IsManualMode() then
                     return
                 end
-                if MarkStandby.fillerInFlight and not MarkStandby.fillerFired then
-                    -- Skill/filler oneshot: keep Follow, never leave combat AI running.
-                    -- (Previously we returned early and Default free-cast other skills.)
+                if MarkStandby.HasMarkedTarget() then
                     return
                 end
                 requestNotCombatOrder("post-SetOtomoCombatAction")
-                if not inAttackWindow() then
-                    forceStandby(getActiveOtomoActor(), "post-SetOtomoCombatAction")
-                end
+                forceStandby(getActiveOtomoActor(), "post-SetOtomoCombatAction")
             end
         )
-        log("mark: SetOtomoCombatAction → undo free combat (Follow during oneshot)")
+        log("mark: SetOtomoCombatAction → undo free combat while unmarked")
     end)
 
     if not MarkStandby.damageHooked then
         MarkStandby.damageHooked = true
         local function onOtomoDamageHook(Context, Info, label)
-            -- Consume oneshot when our Pal lands a hit during filler (damage is allowed in window).
-            if MarkStandby.fillerInFlight and not MarkStandby.fillerFired then
-                local info = unwrap(Info)
-                local attacker = nil
-                pcall(function()
-                    if info ~= nil then
-                        attacker = info.Attacker
-                    end
-                end)
-                if isOurOtomoAttacker(attacker) and MarkStandby.onFillerOtomoDamage ~= nil then
-                    MarkStandby.onFillerOtomoDamage(label)
-                end
-            end
             tryBlockOutgoingOtomoDamage(Context, Info, label)
         end
         pcall(function()
             RegisterHook("/Script/Pal.PalDamageReactionComponent:ProcessDamage_ToServer", function(Context, Info)
                 onOtomoDamageHook(Context, Info, "ProcessDamage")
             end)
-            log("mark: hooked ProcessDamage_ToServer (block otomo damage)")
+            log("mark: hooked ProcessDamage_ToServer (block otomo damage while standby)")
         end)
         pcall(function()
             RegisterHook("/Script/Pal.PalDamageReactionComponent:SendDamage_ToServer", function(Context, _Target, Info)
                 onOtomoDamageHook(Context, Info, "SendDamage")
             end)
-            log("mark: hooked SendDamage_ToServer (block otomo damage)")
+            log("mark: hooked SendDamage_ToServer (block otomo damage while standby)")
         end)
     end
 
@@ -4644,16 +4598,6 @@ function MarkStandby.Register()
             end
         end)
 
-        local lmb = Key.LeftMouseButton or Key.LEFT_MOUSE_BUTTON or Key.LeftMouse
-        if lmb ~= nil then
-            -- Required: SetDisableShootFlag while aiming blocks OnPullTrigger,
-            -- so Aim+LMB must also come from this keybind. Re-entrancy guards
-            -- prevent double orders if PullTrigger still fires.
-            bindKey(lmb, "LMB = Aim+LMB filler attack", function()
-                tryAimLmbMark(nil)
-            end)
-        end
-
         local rmb = Key.RightMouseButton or Key.RIGHT_MOUSE_BUTTON or Key.RightMouse
         if rmb ~= nil then
             bindKey(rmb, "RMB = aim pulse", function()
@@ -4661,23 +4605,10 @@ function MarkStandby.Register()
                 debug("mark: RMB aim pulse")
             end)
         end
-
-        -- Aim+1/2/3: order equipped active skills (vanilla 1/2/3 unbound while aiming).
-        if Config.Features ~= nil and Config.Features.AimSkillKeyProbe == true then
-            bindKey(Key.ONE, "1 = aim skill order", function()
-                tryAimSkillOrder(1)
-            end)
-            bindKey(Key.TWO, "2 = aim skill order", function()
-                tryAimSkillOrder(2)
-            end)
-            bindKey(Key.THREE, "3 = aim skill order", function()
-                tryAimSkillOrder(3)
-            end)
-        end
     end
 
     startStandbyLoop()
-    log("mark standby ready — LogicMod + NotCombat; Aim+LMB filler; Aim+1/2/3 skills")
+    log("mark standby ready — LogicMod/NotCombat unmarked; Aim+MMB mark → engage")
 end
 
 return MarkStandby

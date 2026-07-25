@@ -7,12 +7,15 @@
     - disable throw + switch via PalPlayerController flags (real input block)
 
   Combat window =
-    battle mode, damage taken/dealt by player/party, OR recent trainer orders
-    (Aim+LMB / Aim+1/2/3). Mere proximity to wild Pals does NOT count.
+    battle mode, damage taken/dealt by player/party (Owner/Instigator walk),
+    Aim+MMB sticky mark, OR recent MarkStandby combat notes.
+    Mere proximity to wild Pals does NOT count.
   Lock starts when:
     - a Pal is sent out (ActivateOtomo) while the combat window is open, OR
     - combat begins while a Pal is already fielded (first hit / battle mode /
-      trainer order). Not on recall alone.
+      Aim+MMB mark). Not on recall alone.
+    After the lock timer expires mid-fight, the next ActivateOtomo / switch
+    re-arms the lock while the combat window is still open.
 
   Lock also lifts early when the active Pal dies / is force-inactivated.
 
@@ -148,11 +151,52 @@ local function markCombat(reason)
     debug("combat marked (" .. tostring(reason) .. ")")
 end
 
+-- Forward decls: probeGameBattleMode / inCombatWindow run before these are assigned.
+local getLocalPlayerCharacter
+local getActiveOtomoActor
+
+--- Live-read base-game battle mode (hooks can miss / lag; player may not flag while Pal fights).
+local function readActorBattleMode(actor)
+    if actor == nil then
+        return false
+    end
+    local okVal = false
+    pcall(function()
+        if actor.GetBattleMode ~= nil then
+            okVal = actor:GetBattleMode() == true
+        end
+    end)
+    if okVal then
+        return true
+    end
+    pcall(function()
+        local v = actor.bIsBattleMode
+        if type(v) == "boolean" then
+            okVal = v
+        elseif v ~= nil and v.get ~= nil then
+            okVal = v:get() == true
+        end
+    end)
+    return okVal == true
+end
+
+local function probeGameBattleMode()
+    if getLocalPlayerCharacter ~= nil and readActorBattleMode(getLocalPlayerCharacter()) then
+        return true, "player"
+    end
+    if getActiveOtomoActor ~= nil and readActorBattleMode(getActiveOtomoActor()) then
+        return true, "otomo"
+    end
+    return false, nil
+end
+
 local function inCombatWindow()
     if Config.DebugAlwaysInCombat == true then
         return true
     end
-    if State.battleMode == true then
+    -- Prefer live game battle mode over hook cache.
+    local liveBattle = select(1, probeGameBattleMode())
+    if liveBattle or State.battleMode == true then
         return true
     end
     if State.lastCombatAt ~= nil then
@@ -160,8 +204,16 @@ local function inCombatWindow()
             return true
         end
     end
-    -- Trainer orders (Aim+LMB / Aim+1/2/3) mark MarkStandby combat — include so
-    -- mid-fight pal swap/recall still starts summon lock even before damage hooks fire.
+    -- Controlled Pal: sticky Aim+MMB mark means we are in a fight.
+    if MarkStandby ~= nil and MarkStandby.HasMarkedTarget ~= nil then
+        local okMark, marked = pcall(function()
+            return MarkStandby.HasMarkedTarget() == true
+        end)
+        if okMark and marked then
+            return true
+        end
+    end
+    -- Trainer engage / battle notes from mark_standby.
     if MarkStandby ~= nil and MarkStandby.IsPlayerInCombat ~= nil then
         local ok, inTrainerCombat = pcall(function()
             return MarkStandby.IsPlayerInCombat() == true
@@ -561,7 +613,7 @@ local function clearLock(reason)
     log("lock cleared (" .. tostring(reason) .. ")")
 end
 
-local function getLocalPlayerCharacter()
+getLocalPlayerCharacter = function()
     local pc = getPlayerController()
     if pc == nil then
         return nil
@@ -582,7 +634,7 @@ local function getLocalPlayerCharacter()
     return nil
 end
 
-local function getActiveOtomoActor()
+getActiveOtomoActor = function()
     if not isWorldAlive() then
         return nil
     end
@@ -611,8 +663,16 @@ local function getActiveOtomoActor()
             otomo = param.OtomoPal
         end
     end)
-    if otomo ~= nil and otomo:IsValid() then
-        return otomo
+    -- OtomoPal is often a weak/wrapper — unwrap before IsValid.
+    otomo = unwrap(otomo)
+    if otomo ~= nil then
+        local ok = false
+        pcall(function()
+            ok = otomo:IsValid() == true
+        end)
+        if ok then
+            return otomo
+        end
     end
     return nil
 end
@@ -649,11 +709,16 @@ local function maybeStartSummonLock(reason)
     return true
 end
 
---- Mark combat window. If a Pal is already out and we have not locked yet this
---- fight, start summon lock immediately (fixes free mid-fight swaps before the
---- next ActivateOtomo — damage/battle often arrive only after the first swap).
+--- Mark combat window. If a Pal is already out and we are not currently locked,
+--- arm summon lock immediately so mid-fight swap/recall is gated before the next
+--- ActivateOtomo. After the timer expires, further damage keeps the combat window
+--- warm; ActivateOtomo / switch re-arms the lock while still in combat.
 local function markCombatFromEvent(reason)
     if not Config.Features.SummonLock or not summonLockOnlyInCombat() then
+        -- Still record combat for hate pulse / diagnostics when lock is combat-gated off.
+        if Config.Features.SummonLock then
+            markCombat(reason)
+        end
         return
     end
     if not isWorldAlive() then
@@ -664,11 +729,12 @@ local function markCombatFromEvent(reason)
     if isLocked() then
         return
     end
-    -- One lock arm from combat-start per fight; ActivateOtomo still re-locks later.
+    -- One auto-arm from combat-start per fight; ActivateOtomo still re-locks later.
     if State.lockedThisCombat then
         return
     end
-    if State.activeSlot == nil then
+    -- Prefer slot, but also arm if a Pal is fielded and slot was never set.
+    if State.activeSlot == nil and not hasActiveOtomoOut() then
         return
     end
     if maybeStartSummonLock("combat-" .. tostring(reason or "?")) then
@@ -676,7 +742,8 @@ local function markCombatFromEvent(reason)
     end
 end
 
---- True if actor is the local player or their active party Pal.
+--- True if actor is the local player, their active party Pal, or owned by either
+--- (bullets / weapons / skills often appear as Attacker instead of the pawn).
 local function isLocalTrainerSideActor(actor)
     if actor == nil then
         return false
@@ -694,18 +761,80 @@ local function isLocalTrainerSideActor(actor)
         end)
         return ok == true
     end
-    local player = getLocalPlayerCharacter()
-    if sameActor(actor, player) then
-        return true
+    local function unwrapActor(obj)
+        if obj == nil then
+            return nil
+        end
+        local v = unwrap(obj)
+        if v == nil then
+            return nil
+        end
+        local ok = false
+        pcall(function()
+            ok = v:IsValid() == true
+        end)
+        if ok then
+            return v
+        end
+        return nil
     end
+
+    local player = getLocalPlayerCharacter()
     local otomo = getActiveOtomoActor()
-    if sameActor(actor, otomo) then
-        return true
+
+    local seen = {}
+    local cur = unwrapActor(actor)
+    for _ = 1, 6 do
+        if cur == nil then
+            break
+        end
+        local id = nil
+        pcall(function()
+            id = cur:GetFullName()
+        end)
+        if id ~= nil then
+            if seen[id] then
+                break
+            end
+            seen[id] = true
+        end
+        if sameActor(cur, player) or sameActor(cur, otomo) then
+            return true
+        end
+
+        local nextObj = nil
+        pcall(function()
+            if cur.GetOwner ~= nil then
+                nextObj = cur:GetOwner()
+            end
+        end)
+        nextObj = unwrapActor(nextObj)
+        if nextObj == nil then
+            pcall(function()
+                nextObj = cur.Owner
+            end)
+            nextObj = unwrapActor(nextObj)
+        end
+        if nextObj == nil then
+            pcall(function()
+                nextObj = cur.Instigator
+            end)
+            nextObj = unwrapActor(nextObj)
+        end
+        if nextObj == nil then
+            pcall(function()
+                if cur.GetInstigator ~= nil then
+                    nextObj = cur:GetInstigator()
+                end
+            end)
+            nextObj = unwrapActor(nextObj)
+        end
+        cur = nextObj
     end
     return false
 end
 
---- Damage taken by OR dealt by player/party → combat window (no auto-lock).
+--- Damage taken by OR dealt by player/party → combat window (+ lock if Pal out).
 local function onCombatRelevantDamage(attacker, defender, reasonTag)
     if not isWorldAlive() then
         return
@@ -715,13 +844,22 @@ local function onCombatRelevantDamage(attacker, defender, reasonTag)
     if not took and not dealt then
         return
     end
+    local tag = reasonTag or "damage"
     if took and dealt then
-        markCombatFromEvent(reasonTag or "damage-both")
+        tag = tag .. "-both"
     elseif took then
-        markCombatFromEvent(reasonTag or "damage-taken")
+        tag = tag .. "-taken"
     else
-        markCombatFromEvent(reasonTag or "damage-dealt")
+        tag = tag .. "-dealt"
     end
+    debug(string.format(
+        "combat damage %s (palOut=%s locked=%s lockedThisCombat=%s)",
+        tag,
+        tostring(hasActiveOtomoOut()),
+        tostring(isLocked()),
+        tostring(State.lockedThisCombat)
+    ))
+    markCombatFromEvent(tag)
 end
 
 local function onProcessDamageForCombat(Context, Info)
@@ -732,6 +870,7 @@ local function onProcessDamageForCombat(Context, Info)
             defender = comp:GetOwner()
         end
     end)
+    defender = unwrap(defender)
     local info = unwrap(Info)
     local attacker = nil
     pcall(function()
@@ -739,7 +878,21 @@ local function onProcessDamageForCombat(Context, Info)
             attacker = info.Attacker
         end
     end)
+    attacker = unwrap(attacker)
     onCombatRelevantDamage(attacker, defender, "ProcessDamage")
+end
+
+local function onSendDamageForCombat(_Context, Target, Info)
+    local defender = unwrap(Target)
+    local info = unwrap(Info)
+    local attacker = nil
+    pcall(function()
+        if info ~= nil then
+            attacker = info.Attacker
+        end
+    end)
+    attacker = unwrap(attacker)
+    onCombatRelevantDamage(attacker, defender, "SendDamage")
 end
 
 local function onPlayerBattleModeChanged(isBattle)
@@ -751,6 +904,7 @@ local function onPlayerBattleModeChanged(isBattle)
     if State.battleMode then
         markCombatFromEvent("battle-mode")
     elseif wasBattle and summonLockOnlyInCombat() then
+        -- Live otomo/player battle or sticky mark can still keep the window open.
         if isLocked() and not inCombatWindow() then
             clearLock("left combat")
             pcall(function()
@@ -759,9 +913,12 @@ local function onPlayerBattleModeChanged(isBattle)
         end
         endCombatSessionIfNeeded("battle-mode-off")
     end
+    local live, liveSrc = probeGameBattleMode()
     log(string.format(
-        "battle mode=%s combatWindow=%s lockedThisCombat=%s",
+        "battle mode=%s live=%s(%s) combatWindow=%s lockedThisCombat=%s",
         tostring(State.battleMode),
+        tostring(live),
+        tostring(liveSrc or "-"),
         tostring(inCombatWindow()),
         tostring(State.lockedThisCombat)
     ))
@@ -828,7 +985,7 @@ local function registerCombatHooks()
         log("hooked PalCharacter:OnChangeBattleMode (combat-only lock)")
     end)
 
-    -- Damage taken by OR dealt by player / party Pal.
+    -- Damage taken by OR dealt by player / party Pal (weapon/bullet Owner walk).
     local okProc, errProc = pcall(function()
         RegisterHook(
             "/Script/Pal.PalDamageReactionComponent:ProcessDamage_ToServer",
@@ -839,6 +996,18 @@ local function registerCombatHooks()
         log("hooked ProcessDamage_ToServer (damage taken/dealt → combat)")
     else
         log("ProcessDamage_ToServer combat hook failed: " .. tostring(errProc))
+    end
+
+    local okSend, errSend = pcall(function()
+        RegisterHook(
+            "/Script/Pal.PalDamageReactionComponent:SendDamage_ToServer",
+            onSendDamageForCombat
+        )
+    end)
+    if okSend then
+        log("hooked SendDamage_ToServer (damage taken/dealt → combat)")
+    else
+        log("SendDamage_ToServer combat hook failed: " .. tostring(errSend))
     end
 
     local okDmg, errDmg = pcall(function()
@@ -1262,17 +1431,35 @@ local function onActivateOtomo(self, SlotId, StartTransform, IsSuccess)
         if not isWorldAlive() then
             return
         end
-        pcall(function()
-            Threat.OnPalActivated(activateSlot)
-        end)
-        pcall(function()
-            Attack.OnPalActivated(activateSlot)
-        end)
-        pcall(function()
-            MarkStandby.OnPalActivated(activateSlot)
-        end)
+
+        -- Snapshot combat BEFORE MarkStandby activate (used to clear mark first).
+        local liveBattle, liveSrc = probeGameBattleMode()
+        if liveBattle then
+            State.battleMode = true
+            markCombat("live-battle-" .. tostring(liveSrc or "?"))
+        end
+        local wasMarked = false
+        if MarkStandby ~= nil and MarkStandby.HasMarkedTarget ~= nil then
+            pcall(function()
+                wasMarked = MarkStandby.HasMarkedTarget() == true
+            end)
+        end
+        if wasMarked then
+            markCombat("sticky-mark-pre-activate")
+        end
+        debug(string.format(
+            "ActivateOtomo combat probe liveBattle=%s(%s) marked=%s window=%s",
+            tostring(liveBattle),
+            tostring(liveSrc or "-"),
+            tostring(wasMarked),
+            tostring(inCombatWindow())
+        ))
+
+        -- Arm summon lock first while combat signals are still valid.
+        local lockedNow = false
         if Config.Features.SummonLock then
-            if maybeStartSummonLock("ActivateOtomo") then
+            lockedNow = maybeStartSummonLock("ActivateOtomo") == true
+            if lockedNow then
                 startDeathWatch()
                 Session.Defer(500, function()
                     if not isLocked() then
@@ -1294,6 +1481,16 @@ local function onActivateOtomo(self, SlotId, StartTransform, IsSuccess)
                 end)
             end
         end
+
+        pcall(function()
+            Threat.OnPalActivated(activateSlot)
+        end)
+        pcall(function()
+            Attack.OnPalActivated(activateSlot)
+        end)
+        pcall(function()
+            MarkStandby.OnPalActivated(activateSlot)
+        end)
     end
 
     Session.Defer(1, afterActivate)
@@ -1322,6 +1519,20 @@ local function onInactivateCurrentOtomo(self)
         end
         handleActivePalLost("InactivateCurrentOtomo during lock")
         return
+    end
+
+    -- Mid-switch: keep combat memory / sticky mark so ActivateOtomo can arm lock.
+    local liveBattle, liveSrc = probeGameBattleMode()
+    if liveBattle or inCombatWindow() then
+        if liveBattle then
+            State.battleMode = true
+        end
+        markCombat("switch-inactivate-" .. tostring(liveSrc or "window"))
+        log(string.format(
+            "InactivateCurrentOtomo mid-switch — keep combat (liveBattle=%s window=%s)",
+            tostring(liveBattle),
+            tostring(inCombatWindow())
+        ))
     end
 
     pcall(function()
@@ -1573,7 +1784,7 @@ Schematics.Register()
 Threat.Register()
 Attack.Register()
 MarkStandby.Register()
--- Bridge trainer combat notes into summon-lock combat window (Aim+LMB / skills).
+-- Bridge trainer combat notes into summon-lock combat window (Aim+MMB engage).
 MarkStandby.OnCombatNoted = function(reason)
     markCombatFromEvent("trainer-" .. tostring(reason or "note"))
 end

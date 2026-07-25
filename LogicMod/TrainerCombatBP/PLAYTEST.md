@@ -1,4 +1,4 @@
-# Playtest — LogicMod otomo standby
+# Playtest — Controlled Pal (Aim+MMB)
 
 ## Before playtest
 
@@ -11,12 +11,12 @@
 
 ## Checklist
 
-1. Console shows `[TrainerCombat] loaded (... logicmod-bridge)`.
-2. If pak present: `bp: ModActor cached`. If not: `bp: TrainerCombatBP ModActor not loaded yet — using Lua NotCombat fallback`.
-3. Throw a Pal → announce standby / NotCombat.
+1. Console shows `[TrainerCombat] loaded`.
+2. If pak present: `bp: ModActor cached`. If not: Lua NotCombat fallback log.
+3. Throw a Pal → standby / NotCombat (no free fight).
 4. Fight with spear **without** marking → Pal must **not** attack and stay near you.
-5. Aim + LMB on a wild Pal → `Marked: <localized name>` (e.g. Lamball).
-6. H or J clears mark; Pal stays on standby.
+5. Aim + MMB on a wild Pal → `Marked: <localized name>` and Pal **engages** with vanilla combat AI.
+6. H or J clears mark → Pal returns to standby.
 7. Recall Pal → order returns toward Default; no nullptr spam.
 
 ## Pass / fail notes
@@ -24,8 +24,9 @@
 | Case | Expected |
 |------|----------|
 | No pak, NotCombat works | Temporary pass until LogicMod cooked |
-| No pak, Pal still free-fights | Fail — finish LogicMod cook |
-| Pak loaded, Pal still free-fights | Fail — check ForceOtomoStandby graph / NotCombat call |
-| Aim+LMB mark name wrong | Fail — localized name path (Lua) |
+| No pak, Pal still free-fights unmarked | Fail — finish LogicMod cook / check Lua fallback |
+| Pak loaded, Pal still free-fights unmarked | Fail — check ForceOtomoStandby graph / NotCombat call |
+| Aim+MMB mark, Pal never engages | Fail — check `releaseToEngage` / ManualStandby off |
+| Clear mark, Pal keeps fighting freely | Fail — clear path must re-arm standby |
 
-Log snippets to capture: `RequestSetOtomoOrder(NotCombat)`, `bp: SetManualStandby(true)`, any `Combat_Standard` spam.
+Log snippets to capture: `RequestSetOtomoOrder(NotCombat)`, `mark: ENGAGE`, `bp: SetManualStandby`, any `Combat_Standard` spam while unmarked.

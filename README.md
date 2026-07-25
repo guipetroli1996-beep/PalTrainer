@@ -6,6 +6,8 @@ GitHub repo name: **PalTrainer** · in-game mod folder: `TrainerCombat`
 
 **Full plan:** see [`ROADMAP.md`](./ROADMAP.md)
 
+Discontinued Aim+LMB filler / Aim+1/2/3 skill-order build: branch `archive/aim-lmb-skills`.
+
 ## Status
 
 | Phase | Feature | Status |
@@ -17,10 +19,10 @@ GitHub repo name: **PalTrainer** · in-game mod folder: `TrainerCombat`
 | 1 | Capture sphere throw cooldown | Working |
 | 2 | Attack stat boosts party Pals | Working |
 | 2 | Enemies prefer Pal (aggro assist) | Working |
-| 3 | Aim+LMB filler + follow-only standby | Working (Lua NotCombat fallback) |
-| 3 | Aim+1/2/3 skill orders | Working |
-| 3 | LogicMod standby (stronger than Lua) | Optional — cook currently broken/stub |
-| 3 | Aim skill UMG HUD | Parked (off by default) |
+| 3 | Unmarked Pal standby (LogicMod / NotCombat) | Working (Lua fallback if no pak) |
+| 3 | Aim+MMB mark → engage (vanilla Pal AI) | Working |
+| 3 | Clear mark (H / J) → standby | Working |
+| 3 | LogicMod standby `.pak` | Optional — cook currently broken/stub |
 | 4 | Multiplayer | Not started |
 
 > Tool combat-damage zeroing was cancelled (not in scope).  
@@ -62,7 +64,7 @@ TrainerCombat : 1
 
 Lua alone cannot always stop `PalAIActionCombat_Standard`. A cooked **LogicMod** is the preferred standby path when available.
 
-**Current reality:** the last cook produced an empty/stub `pakchunk7` (~3KB). Deploy refuses that stub. Until a real `.pak` exists, Lua uses a **NotCombat order fallback** (filler + skills still work).
+**Current reality:** the last cook produced an empty/stub `pakchunk7` (~3KB). Deploy refuses that stub. Until a real `.pak` exists, Lua uses a **NotCombat order fallback**.
 
 ### Prerequisites (when re-cooking)
 
@@ -92,9 +94,9 @@ See also [`LogicMod/TrainerCombatBP/COOK_STATUS.md`](./LogicMod/TrainerCombatBP/
 1. Start Palworld (single-player).
 2. Open the UE4SS GUI console.
 3. You should see: `[TrainerCombat] loaded`
-4. Enter a world, throw a Pal → standby / follow-only (Lua NotCombat if no LogicMod).
-5. Aim+LMB on a hostile → Pal filler attack, then standby.
-6. Aim+1/2/3 while aiming → equipped skill orders (vanilla 1/2/3 Pal/sphere switch suppressed while aiming).
+4. Throw a Pal → standby / follow-only (no free fight).
+5. Aim+MMB on a hostile → mark announce + Pal engages with vanilla combat AI.
+6. Press **H** or **J** → clear mark, Pal returns to standby.
 7. In combat, swap/recall should hit summon lock CD; sphere throws use sphere CD.
 
 ## Dev workflow
@@ -114,9 +116,8 @@ Relevant knobs:
 - `Features.MarkStandby`
 - `Features.SummonLock` / `SummonLockOnlyInCombat`
 - `MarkStandby.LogicMod.Enabled`
-- `MarkStandby.SkillOrder.Enabled` / `Features.AimSkillKeyProbe`
-- `MarkStandby.AnnounceAttackCommands` / `AnnounceSkillCommands` / `AnnounceSkillCooldown`
-- `Hud.UseAimSkillHud` (UMG skill bar — parked / off by default)
+- `MarkStandby.ManualAttackOnly` / `BlockOtomoDamage`
+- `MarkStandby.AnnounceMark`
 
 ## Notes
 
