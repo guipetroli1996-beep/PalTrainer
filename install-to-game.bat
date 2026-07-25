@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions
+setlocal
 
 REM Copy TrainerCombat Lua mod + shipped LogicMod pak into Palworld.
 REM Usage:
@@ -16,6 +16,7 @@ if "%~1"=="" (
 set "SRC=%~dp0TrainerCombat"
 set "DST=%~1\TrainerCombat"
 set "PAKSRC=%~dp0LogicMod\TrainerCombatBP\dist\TrainerCombatBP.pak"
+set "HELPER=%~dp0scripts\install-logicmod-pak.ps1"
 
 if not exist "%SRC%\Scripts\main.lua" (
   echo ERROR: source mod not found at %SRC%
@@ -32,21 +33,11 @@ echo Installed Lua mod to %DST%
 echo Make sure Mods\mods.txt contains: TrainerCombat : 1
 
 if exist "%PAKSRC%" (
-  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "$mods = (Resolve-Path -LiteralPath '%~1').Path;" ^
-    "$pakSrc = (Resolve-Path -LiteralPath '%PAKSRC%').Path;" ^
-    "$p = Get-Item -LiteralPath $mods;" ^
-    "$pal = $null;" ^
-    "while ($p -ne $null) {" ^
-    "  if (Test-Path -LiteralPath (Join-Path $p.FullName 'Content\Paks')) { $pal = $p.FullName; break }" ^
-    "  $p = $p.Parent" ^
-    "};" ^
-    "if ($null -eq $pal) { Write-Host 'WARN: could not find Content\Paks from Mods path — copy TrainerCombatBP.pak manually to Pal\Content\Paks\LogicMods\'; exit 0 };" ^
-    "$destDir = Join-Path $pal 'Content\Paks\LogicMods';" ^
-    "New-Item -ItemType Directory -Force -Path $destDir | Out-Null;" ^
-    "$destPak = Join-Path $destDir 'TrainerCombatBP.pak';" ^
-    "Copy-Item -LiteralPath $pakSrc -Destination $destPak -Force;" ^
-    "Write-Host ('Installed LogicMod pak to ' + $destPak + ' (' + (Get-Item $destPak).Length + ' bytes)')"
+  if exist "%HELPER%" (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%HELPER%" -ModsFolder "%~1" -PakSource "%PAKSRC%"
+  ) else (
+    echo WARN: missing %HELPER% - copy TrainerCombatBP.pak to Pal\Content\Paks\LogicMods\ manually
+  )
 ) else (
   echo WARN: shipped pak not found at %PAKSRC%
 )
